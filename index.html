@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Masonry Gallery — Sliding Main Panels + Lightbox (Reworked)</title>
+  <style>
+    :root { --gutter: 8px; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      background: #f6f7f8;
+      font-family: system-ui, sans-serif;
+      overflow-x: hidden;
+      padding: 24px 0;
+      box-sizing: border-box;
+    }
+
+    .gallery-wrapper {
+      width: 1224px;
+      max-width: calc(100% - 48px);
+      background: #fff;
+      box-shadow: 0 6px 30px rgba(0,0,0,0.08);
+      border-radius: 10px;
+      padding: 12px;
+      box-sizing: border-box;
+      position: relative;
+      overflow: hidden; /* hide sliding panels overflow */
+    }
+
+    /* viewport that holds two panels and allows sliding
+       NOTE: removed fixed height so it grows naturally with content */
+    .grid-viewport {
+      position: relative;
+      height: 80vh;
+      overflow-y: visible;
+      overflow-x: hidden;
+      box-sizing: border-box;
+      padding: 6px; /* visual padding so edges match internal spacing */
+    }
+
+    /* each panel holds grid items and is positioned for sliding */
+    .grid-panel {
+      position: absolute;
+      inset: 6px 6px 6px 6px; /* respect viewport padding */
+      box-sizing: border-box;
+      overflow: visible;
+      transition: transform 420ms cubic-bezier(.22,.9,.27,1), opacity 320ms ease;
+      will-change: transform, opacity;
+      pointer-events: none;
+    }
+
+    .panel-hidden-left  { transform: translateX(-110%); opacity: 0; pointer-events: none; }
+    .panel-hidden-right { transform: translateX(110%);  opacity: 0; pointer-events: none; }
+    .panel-visible { transform: translateX(0); opacity: 1; pointer-events: auto; }
+
+    /* grid layout (Masonry items live inside) */
+    .grid {
+      width: 100%;
+      box-sizing: border-box;
+      padding-bottom: 16px;
+      opacity: 0;
+      transition: opacity .25s ease;
+    }
+    .grid.loaded { opacity: 1; }
+
+    .grid-item {
+      position: relative;
+      width: calc(25% - var(--gutter));
+      margin: 0;
+      margin-top: var(--gutter);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #eaeaea;
+      transition: transform .28s ease;
+      box-sizing: border-box;
+      cursor: zoom-in;
+    }
+
+    .grid-item img {
+      width: 100%;
+      display: block;
+      height: auto;
+      transition: transform .36s ease;
+    }
+
+    .grid-item:hover img { transform: scale(1.08); }
+
+    .grid-item::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.46);
+      opacity: 0;
+      transition: opacity .25s ease;
+      z-index: 1;
+    }
+
+    .overlay-content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%,-50%) scale(.95);
+      color: #fff;
+      text-align: center;
+      z-index: 2;
+      opacity: 0;
+      transition: opacity .25s ease, transform .25s ease;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .grid-item:hover::before { opacity: 1; }
+    .grid-item:hover .overlay-content { opacity: 1; transform: translate(-50%,-50%) scale(1.05); }
+
+    /* responsive */
+    @media (max-width: 900px) {
+      .grid-item { width: calc(50% - var(--gutter)); }
+    }
+    @media (max-width: 600px) {
+      .grid-item { width: 100%; }
+    }
+
+    /* Pagination */
+    .pagination {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    .pagination button {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: none;
+      background: #e6e6e6;
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform .18s ease, background .18s;
+    }
+    .pagination button.active { background: #222; color: #fff; transform: scale(1.04); }
+
+    /* Lightbox */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .28s ease;
+    }
+    .lightbox.active { opacity: 1; pointer-events: auto; }
+
+    .lightbox-image-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 92%;
+      max-width: 1400px;
+    }
+
+    .lightbox img {
+      max-width: 100%;
+      max-height: 84vh;
+      border-radius: 10px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      transition: opacity .28s ease, transform .28s ease;
+      will-change: transform, opacity;
+    }
+
+    .close-btn {
+      position: fixed;
+      top: 20px;
+      right: 30px;
+      font-size: 30px;
+      color: #fff;
+      cursor: pointer;
+      z-index: 10010;
+    }
+
+    .arrow {
+      position: fixed;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 44px;
+      color: #fff;
+      cursor: pointer;
+      z-index: 10010;
+      user-select: none;
+    }
+    .arrow.left { left: 34px; }
+    .arrow.right { right: 34px; }
+
+    /* Fullscreen slide animations (lightbox) */
+    .slide-left { animation: slideLeft .35s ease forwards; }
+    .slide-right { animation: slideRight .35s ease forwards; }
+
+    @keyframes slideLeft {
+      0% { transform: translateX(100%); opacity: 0; } 100% { transform: translateX(0); opacity: 1;}
+    }
+    @keyframes slideRight {
+      0% { transform: translateX(-100%); opacity: 0; } 100% { transform: translateX(0); opacity: 1;}
+    }
+
+    /* Nice small helper for accessibility focus */
+    .pagination button:focus { outline: 3px solid rgba(0,0,0,0.08); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+
+  <div class="gallery-wrapper" role="region" aria-label="Photo gallery">
+    <div class="grid-viewport" id="gridViewport">
+      <!-- two panels will be inserted dynamically (panelA / panelB) -->
+    </div>
+  </div>
+
+  <div class="pagination" id="pagination" aria-label="Gallery pages"></div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox" aria-hidden="true">
+    <div class="lightbox-image-wrapper">
+      <img id="lightboxImage" src="" alt="Enlarged image" />
+    </div>
+    <span class="close-btn" id="closeBtn" role="button" aria-label="Close">✖</span>
+    <span class="arrow left" id="prevBtn" role="button" aria-label="Previous">❮</span>
+    <span class="arrow right" id="nextBtn" role="button" aria-label="Next">❯</span>
+  </div>
+
+  <!-- libs -->
+  <script src="https://unpkg.com/imagesloaded@4/imagesloaded.pkgd.min.js"></script>
+  <script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
+
+  <script>
+  /*******************************
+   * Data (pages)
+   *******************************/
+  const pages = [
+    [
+      "https://picsum.photos/id/1016/500/400",
+      "https://picsum.photos/id/1040/400/300",
+      "https://picsum.photos/id/1045/300/400",
+      "https://picsum.photos/id/1024/500/350",
+      "https://picsum.photos/id/1031/400/500",
+      "https://picsum.photos/id/1015/400/600",
+      "https://picsum.photos/id/1018/350/500",
+      "https://picsum.photos/id/1020/400/400"
+    ],
+    [
+      "https://picsum.photos/id/1040/400/300",
+      "https://picsum.photos/id/1016/500/400",
+      "https://picsum.photos/id/1031/400/500",
+      "https://picsum.photos/id/1045/300/400",
+      "https://picsum.photos/id/1018/350/500",
+      "https://picsum.photos/id/1015/400/600",
+      "https://picsum.photos/id/1024/500/350",
+      "https://picsum.photos/id/1020/400/400"
+    ],
+    [
+      "https://picsum.photos/id/1045/300/400",
+      "https://picsum.photos/id/1020/400/400",
+      "https://picsum.photos/id/1016/500/400",
+      "https://picsum.photos/id/1031/400/500",
+      "https://picsum.photos/id/1015/400/600",
+      "https://picsum.photos/id/1040/400/300",
+      "https://picsum.photos/id/1018/350/500",
+      "https://picsum.photos/id/1024/500/350"
+    ]
+  ];
+
+  /*******************************
+   * DOM refs + state
+   *******************************/
+  const gridViewport = document.getElementById('gridViewport');
+  const paginationEl = document.getElementById('pagination');
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImage = document.getElementById('lightboxImage');
+  const closeBtn = document.getElementById('closeBtn');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+
+  let currentPage = 0;
+  let currentImageIndex = 0;
+  let panelA = null, panelB = null;
+  let activePanel = 'A'; // either 'A' or 'B'
+  let msnryA = null, msnryB = null;
+  let autoplayInterval = null;
+  let isAnimatingPanels = false;
+
+  /*******************************
+   * Helpers: create panels
+   *******************************/
+  function createPanel(id){
+    const panel = document.createElement('div');
+    panel.className = 'grid-panel panel-hidden-right'; // default off-screen right
+    panel.dataset.panelId = id;
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    panel.appendChild(grid);
+    return panel;
+  }
+
+  function panelGrid(panel){
+    return panel.querySelector('.grid');
+  }
+
+  /*******************************
+   * Populate a given panel with images for pageIndex
+   * returns a Promise that resolves when imagesLoaded + Masonry init done
+   *******************************/
+  function populatePanel(panel, pageIndex){
+    return new Promise((resolve) => {
+      const grid = panelGrid(panel);
+      grid.innerHTML = ''; // clear old items in panel
+
+      pages[pageIndex].forEach((src, idx) => {
+        const item = document.createElement('div');
+        item.className = 'grid-item';
+        item.innerHTML = `
+          <img src="${src}" alt="Image ${idx+1}">
+          <div class="overlay-content"><span style="font-size:28px">🔍+</span><div style="margin-top:6px">Zumiraj sliku</div></div>
+        `;
+        // clicking opens lightbox for that index within current page
+        item.addEventListener('click', () => {
+          currentImageIndex = idx;
+          openLightbox();
+        });
+        grid.appendChild(item);
+      });
+
+      // Wait for images to load then init Masonry for that panel
+      imagesLoaded(grid, () => {
+        // destroy existing Masonry instance for this panel if any
+        const panelId = panel.dataset.panelId;
+        if(panelId === 'A' && msnryA) { msnryA.destroy(); msnryA = null; }
+        if(panelId === 'B' && msnryB) { msnryB.destroy(); msnryB = null; }
+
+        const msnry = new Masonry(grid, {
+          itemSelector: '.grid-item',
+          gutter: parseInt(getComputedStyle(document.documentElement).getPropertyValue('--gutter')) || 8,
+          percentPosition: true
+        });
+
+        // store instance
+        if(panelId === 'A') msnryA = msnry;
+        else msnryB = msnry;
+
+        // reveal grid after layout stabilizes
+        setTimeout(() => grid.classList.add('loaded'), 20);
+
+        resolve();
+      });
+    });
+  }
+
+  /*******************************
+   * Swap panels with animation
+   * direction: 'next' (slide left) or 'prev' (slide right)
+   * pagination activation is synced to the start of the animation
+   *******************************/
+  async function switchToPage(newPageIndex, direction = 'next'){
+    if(isAnimatingPanels) return;
+    if(newPageIndex === currentPage) return;
+    isAnimatingPanels = true;
+    clearInterval(autoplayInterval);
+
+    // determine incoming/outgoing panel
+    const incomingPanel = (activePanel === 'A') ? panelB : panelA;
+    const outgoingPanel = (activePanel === 'A') ? panelA : panelB;
+
+    // position incoming offscreen correctly
+    incomingPanel.classList.remove('panel-visible', 'panel-hidden-left', 'panel-hidden-right');
+    incomingPanel.classList.add(direction === 'next' ? 'panel-hidden-right' : 'panel-hidden-left');
+
+    // populate incoming panel (wait for images + masonry)
+    await populatePanel(incomingPanel, newPageIndex);
+
+    // force reflow so transitions work
+    void incomingPanel.offsetWidth;
+
+    // animate: outgoing moves out, incoming moves in
+    outgoingPanel.classList.remove('panel-visible', 'panel-hidden-left', 'panel-hidden-right');
+    incomingPanel.classList.remove('panel-hidden-left', 'panel-hidden-right');
+
+    if(direction === 'next'){
+      outgoingPanel.classList.add('panel-hidden-left');   // slide out left
+      incomingPanel.classList.add('panel-visible');       // slide in from right
+    } else {
+      outgoingPanel.classList.add('panel-hidden-right');  // slide out right
+      incomingPanel.classList.add('panel-visible');       // slide in from left
+    }
+
+    // --- SYNC: update pagination right when animation starts ---
+    document.querySelectorAll('.pagination button').forEach((b, idx) => {
+      b.classList.toggle('active', idx === newPageIndex);
+    });
+
+    // wait for animation to finish (~transition duration)
+    await new Promise(r => setTimeout(r, 460));
+
+    // swap activePanel pointer
+    activePanel = (activePanel === 'A') ? 'B' : 'A';
+    currentPage = newPageIndex;
+
+    // ensure outgoing panel is left off-screen to avoid pointer issues
+    isAnimatingPanels = false;
+
+    // restart autoplay
+    startAutoplay();
+  }
+
+  /*******************************
+   * Initialize panels and first load
+   *******************************/
+  function initPanels(){
+    panelA = createPanel('A');
+    panelB = createPanel('B');
+
+    // append both to viewport (A on top initially)
+    gridViewport.appendChild(panelA);
+    gridViewport.appendChild(panelB);
+
+    // mark A visible initially, B off to right
+    panelA.classList.remove('panel-hidden-right', 'panel-hidden-left');
+    panelA.classList.add('panel-visible');
+    panelB.classList.remove('panel-visible','panel-hidden-left','panel-hidden-right');
+    panelB.classList.add('panel-hidden-right');
+
+    // populate both panels (populate A first)
+    populatePanel(panelA, 0).then(()=>{
+      // populate B ahead of time with next page (optional)
+      const nextIdx = (0+1)%pages.length;
+      populatePanel(panelB, nextIdx);
+    });
+  }
+
+  /*******************************
+   * Pagination builder
+   *******************************/
+  function buildPagination(){
+    paginationEl.innerHTML = '';
+    pages.forEach((_, idx) => {
+      const btn = document.createElement('button');
+      btn.textContent = idx+1;
+      if(idx === 0) btn.classList.add('active');
+      btn.addEventListener('click', () => {
+        if(idx === currentPage) return;
+        const dir = idx > currentPage ? 'next' : 'prev';
+        switchToPage(idx, dir);
+      });
+      paginationEl.appendChild(btn);
+    });
+  }
+
+  /*******************************
+   * Autoplay
+   *******************************/
+  function startAutoplay(){
+    clearInterval(autoplayInterval);
+    autoplayInterval = setInterval(() => {
+      const next = (currentPage + 1) % pages.length;
+      switchToPage(next, 'next');
+    }, 5000);
+  }
+
+  /*******************************
+   * Lightbox controls (unchanged)
+   *******************************/
+  function openLightbox(){
+    lightbox.classList.add('active');
+    lightbox.setAttribute('aria-hidden','false');
+    showLightboxImage();
+  }
+
+  function closeLightbox(){
+    lightbox.classList.remove('active');
+    lightbox.setAttribute('aria-hidden','true');
+  }
+
+  let lastLightboxIndex = -1;
+  function showLightboxImage(direction = null){
+    // remove animation classes
+    lightboxImage.classList.remove('slide-left','slide-right');
+    void lightboxImage.offsetWidth; // restart animation
+
+    if(direction === 'next') lightboxImage.classList.add('slide-left');
+    if(direction === 'prev') lightboxImage.classList.add('slide-right');
+
+    // use the images for the current page
+    const src = pages[currentPage][currentImageIndex];
+    lightboxImage.src = src;
+    lastLightboxIndex = currentImageIndex;
+  }
+
+  // next / prev in lightbox
+  nextBtn.addEventListener('click', () => {
+    currentImageIndex = (currentImageIndex + 1) % pages[currentPage].length;
+    showLightboxImage('next');
+  });
+  prevBtn.addEventListener('click', () => {
+    currentImageIndex = (currentImageIndex - 1 + pages[currentPage].length) % pages[currentPage].length;
+    showLightboxImage('prev');
+  });
+
+  closeBtn.addEventListener('click', closeLightbox);
+
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape') closeLightbox();
+    if(e.key === 'ArrowRight') {
+      if(lightbox.classList.contains('active')) nextBtn.click();
+      else { // advance main page if not animating
+        const next = (currentPage + 1) % pages.length;
+        switchToPage(next, 'next');
+      }
+    }
+    if(e.key === 'ArrowLeft') {
+      if(lightbox.classList.contains('active')) prevBtn.click();
+      else {
+        const prev = (currentPage - 1 + pages.length) % pages.length;
+        switchToPage(prev, 'prev');
+      }
+    }
+  });
+
+  /*******************************
+   * Setup on DOM ready
+   *******************************/
+  document.addEventListener('DOMContentLoaded', () => {
+    initPanels();
+    buildPagination();
+    startAutoplay();
+  });
+
+  </script>
+</body>
+</html>
